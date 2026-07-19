@@ -16,6 +16,13 @@ PAPERS_DIR = KNOWLEDGE_DIR / "papers"
 CHUNKS_DIR = KNOWLEDGE_DIR / "chunks"
 TOC_DIR = KNOWLEDGE_DIR / "toc"
 
+DEFAULT_QUERY_ALIASES = {
+    "qkv": ["查询", "键", "值", "query", "key", "value"],
+    "注意力机制": ["attention", "自注意力", "self-attention"],
+    "transformer": ["自注意力", "编码器", "解码器"],
+}
+SOURCE_QUALITY = {"textbook": 3, "pdf": 3, "concept": 2, "paper": 1}
+
 
 class KnowledgeBase:
     """PDF 教材 + JSON 知识条目的 RAG 检索服务"""
@@ -250,6 +257,9 @@ class KnowledgeBase:
                 "page": "",
                 "type": entry.get("type", "concept"),
                 "difficulty": entry.get("difficulty", "easy"),
+                "course": entry.get("course", ""),
+                "topic": entry.get("topic", ""),
+                "source_quality": entry.get("source_quality", ""),
             }
             idx = len(self.chunks)
             self.chunks.append(ch)
@@ -274,6 +284,75 @@ class KnowledgeBase:
 
     # ---- 检索 ----
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return re.sub(r"\s+", "", text.lower())
+
+    def _expand_query_terms(self, query: str) -> tuple[list[str], list[str]]:
+        raw_terms = list(dict.fromkeys(self._extract_keywords(query)))
+        normalized_query = self._normalize_text(query)
+        alias_terms = []
+        for trigger, aliases in DEFAULT_QUERY_ALIASES.items():
+            if trigger in normalized_query:
+                alias_terms.extend(aliases)
+        return raw_terms, list(dict.fromkeys(alias_terms))
+
+    @staticmethod
+    def _char_bigram_similarity(left: str, right: str) -> float:
+        def bigrams(value: str) -> set[str]:
+            return {value[index:index + 2] for index in range(max(0, len(value) - 1))}
+
+        left_grams, right_grams = bigrams(left), bigrams(right)
+        if not left_grams or not right_grams:
+            return 0.0
+        return len(left_grams & right_grams) / len(left_grams | right_grams)
+
+    def _score_chunk(self, chunk: dict, query: str, raw_terms: list[str], alias_terms: list[str]):
+        title = chunk.get("doc_title", "")
+        chapter = chunk.get("chapter", {})
+        chapter_title = chapter.get("chapter_title", "") if isinstance(chapter, dict) else ""
+        text = chunk.get("text", "")
+        haystack = self._normalize_text(" ".join([title, chapter_title, text]))
+        normalized_query = self._normalize_text(query)
+        keyword_hits = sum(1 for term in raw_terms if self._normalize_text(term) in haystack)
+        alias_hits = sum(1 for term in alias_terms if self._normalize_text(term) in haystack)
+        title_haystack = self._normalize_text(" ".join([title, chapter_title]))
+        title_hit = any(self._normalize_text(term) in title_haystack for term in raw_terms)
+        phrase_hit = bool(normalized_query and normalized_query in haystack)
+        ngram_score = round(self._char_bigram_similarity(normalized_query, haystack) * 3, 3)
+        source_quality = chunk.get("source_quality") or SOURCE_QUALITY.get(chunk.get("type", "pdf"), 1)
+        details = {
+            "keyword": keyword_hits * 3,
+            "alias": alias_hits * 2,
+            "title": 4 if title_hit else 0,
+            "phrase": 5 if phrase_hit else 0,
+            "ngram": ngram_score,
+            "source_quality": source_quality,
+        }
+        reasons = []
+        if title_hit:
+            reasons.append("标题匹配")
+        if phrase_hit:
+            reasons.append("主题短语匹配")
+        if alias_hits:
+            reasons.append("同义词扩展匹配")
+        if keyword_hits and not reasons:
+            reasons.append("关键词匹配")
+        if source_quality >= 3:
+            reasons.append("教材优先")
+        return round(sum(details.values()), 3), details, reasons
+
+    @staticmethod
+    def _dedupe_ranked_chunks(ranked_chunks: list[dict]) -> list[dict]:
+        seen = set()
+        deduped = []
+        for chunk in ranked_chunks:
+            key = (chunk.get("doc_id", ""), chunk.get("page") or chunk.get("id", ""))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(chunk)
+        return deduped
+
     def retrieve(self, query: str, top_k: int = 5, doc_id: str = "") -> List[dict]:
         """检索最相关的 chunks（供 RAG 注入用），可选按文档ID筛选"""
         if not self._loaded:
@@ -288,27 +367,33 @@ class KnowledgeBase:
             if not source_chunks:
                 return []
 
-        query_words = self._extract_keywords(query)
-        if not query_words:
+        query_words, alias_words = self._expand_query_terms(query)
+        if not query_words and not alias_words:
             return []
 
-        scores: Dict[int, int] = {}
-        for w in query_words:
+        candidate_indexes = set()
+        for w in query_words + alias_words:
             for idx in self._keyword_index.get(w, []):
                 if idx >= len(self.chunks):
                     continue
                 ch = self.chunks[idx]
                 if doc_id and self._doc_id(ch.get("doc_title", "")) != doc_id:
                     continue
-                scores[idx] = scores.get(idx, 0) + 1
+                candidate_indexes.add(idx)
 
-        sorted_idxs = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
-        results = []
-        for idx, score in sorted_idxs:
+        ranked = []
+        for idx in candidate_indexes:
             ch = dict(self.chunks[idx])
+            score, details, reasons = self._score_chunk(ch, query, query_words, alias_words)
             ch["score"] = score
-            results.append(ch)
-        return results
+            ch["score_details"] = details
+            ch["match_reasons"] = reasons
+            ch["evidence_level"] = "supported" if score >= 5 else "weak"
+            ranked.append(ch)
+        ranked.sort(
+            key=lambda chunk: (-chunk["score"], -chunk["score_details"]["title"], chunk.get("id", ""))
+        )
+        return self._dedupe_ranked_chunks(ranked)[:top_k]
 
     def search(self, query: str, type_filter: str = "all", doc_id: str = "", top_k: int = 10) -> dict:
         """前端搜索接口：返回 chunks，支持按文档ID筛选"""
@@ -316,9 +401,20 @@ class KnowledgeBase:
         if type_filter != "all":
             chunks = [c for c in chunks if c.get("type", "pdf") == type_filter]
 
+        evidence_level = "insufficient"
+        warnings = []
+        if chunks:
+            evidence_level = "supported" if chunks[0].get("evidence_level") == "supported" else "weak"
+            if evidence_level == "weak":
+                warnings.append("检索到的依据相关性较低，请核验。")
+        else:
+            warnings.append("知识库未找到充分依据，请核验。")
+
         return {
             "query": query,
             "total": len(chunks),
+            "evidence_level": evidence_level,
+            "warnings": warnings,
             "results": [{
                 "id": c["id"],
                 "title": c.get("doc_title", ""),
@@ -329,6 +425,9 @@ class KnowledgeBase:
                 "difficulty": c.get("difficulty", ""),
                 "page": c.get("page", ""),
                 "score": c.get("score", 0),
+                "score_details": c.get("score_details", {}),
+                "match_reasons": c.get("match_reasons", []),
+                "evidence_level": c.get("evidence_level", "insufficient"),
                 "chapter": c.get("chapter", {}).get("chapter_num", ""),
                 "chapter_title": c.get("chapter", {}).get("chapter_title", ""),
                 "section": c.get("chapter", {}).get("section", ""),
