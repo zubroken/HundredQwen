@@ -1,0 +1,20 @@
+# 多智能体个性化学习系统依赖
+# 安装: pip install -r requirements.txt
+
+# Web 框架
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.12
+
+# LLM API
+openai>=1.6.0
+
+# HTTP 请求（智文 PPT API）
+requests>=2.28.0
+
+# 数据验证
+pydantic>=2.0.0
+
+
+#2026/5/4 提交gitee测试2
+#...测试1 对内仓库提交websocket-client

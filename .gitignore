@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+data/app.db
+data/app.db-shm
+data/app.db-wal
+data/resources.json
+*.log
+.env
+.claude/
+data/chat_history/
+data/students.db
+.vscode/
+.pytest_cache/
+.superpowers/
+.agents/
