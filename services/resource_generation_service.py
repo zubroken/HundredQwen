@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import HTTPException
 
 from models.resources import Resource, ResourceBundle
@@ -25,6 +27,8 @@ class ResourceGenerationService:
         learning_path_agent,
         safety_service: ContentSafetyService | None = None,
         citation_service: CitationService | None = None,
+        agent_timeout_seconds: float = 30.0,
+        monotonic_clock=None,
     ):
         self.db = db
         self.resource_db = resource_db
@@ -39,6 +43,8 @@ class ResourceGenerationService:
         self.learning_path_agent = learning_path_agent
         self.safety_service = safety_service or ContentSafetyService()
         self.citation_service = citation_service or CitationService()
+        self.agent_timeout_seconds = agent_timeout_seconds
+        self.monotonic_clock = monotonic_clock or time.monotonic
 
     def generate_bundle(self, request: dict) -> dict:
         student_id = request.get("student_id", "")
@@ -59,10 +65,21 @@ class ResourceGenerationService:
 
         resources_by_type: dict[str, Resource] = {}
         failed: list[str] = []
+        agent_logs: list[dict] = []
         for resource_type in resource_types:
             agent, method_name = self.agents[resource_type]
+            agent_name = getattr(agent, "name", agent.__class__.__name__)
+            started_at = self.monotonic_clock()
+            duration_ms = 0
+            agent_status = "completed"
             try:
                 resource = getattr(agent, method_name)(profile, prompt)
+                duration_ms = round((self.monotonic_clock() - started_at) * 1000)
+                if duration_ms > self.agent_timeout_seconds * 1000:
+                    raise TimeoutError(
+                        f"{agent_name} timed out after {duration_ms}ms "
+                        f"(limit {round(self.agent_timeout_seconds * 1000)}ms)"
+                    )
                 resource.student_id = student_id
                 resource.course_name = request.get("course_name", "")
                 resource.difficulty = request.get("difficulty", "intermediate")
@@ -76,6 +93,9 @@ class ResourceGenerationService:
             except Exception as exc:
                 failed.append(resource_type)
                 warnings.append(f"{resource_type} generation failed: {exc}")
+                agent_status = "fallback"
+                if not duration_ms:
+                    duration_ms = round((self.monotonic_clock() - started_at) * 1000)
                 resource = self._fallback_resource(
                     resource_type=resource_type,
                     profile=profile,
@@ -85,6 +105,14 @@ class ResourceGenerationService:
                 )
                 self.resource_db.save_resource(resource)
                 resources_by_type[resource_type] = resource
+            agent_logs.append(
+                {
+                    "agent_name": agent_name,
+                    "duration_ms": duration_ms,
+                    "status": agent_status,
+                    "warning_count": len(warnings),
+                }
+            )
 
         if not resources_by_type:
             raise HTTPException(status_code=502, detail="resource generation failed")
@@ -108,7 +136,9 @@ class ResourceGenerationService:
             warnings=warnings,
         )
         self.resource_db.save_bundle(bundle)
-        return self._expand_bundle(bundle.to_dict(), resources_by_type.values(), path)
+        response = self._expand_bundle(bundle.to_dict(), resources_by_type.values(), path)
+        response["agent_logs"] = agent_logs
+        return response
 
     def list_bundles(self, student_id: str) -> list[dict]:
         bundles = self.resource_db.get_bundles_by_student(student_id)

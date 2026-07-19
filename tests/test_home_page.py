@@ -39,6 +39,17 @@ class HomePageTest(unittest.TestCase):
         self.assertIn('id="resourceCitationList"', html)
         self.assertIn('id="learningPathNodes"', html)
 
+    def test_resource_generation_has_status_specific_error_messages_and_button_recovery(self):
+        html = load_home_page_html()
+
+        self.assertIn("function resourceGenerationErrorMessage", html)
+        self.assertIn("输入内容未通过安全检查", html)
+        self.assertIn("未找到对应的学习档案", html)
+        self.assertIn("请求参数有误", html)
+        self.assertIn("生成服务暂时不可用", html)
+        self.assertIn("finally", html)
+        self.assertIn("btn.disabled = false", html)
+
     def test_root_route_returns_html_page(self):
         client = TestClient(create_app(LLMConfig(api_key="", model="deepseek-chat", base_url="")))
 

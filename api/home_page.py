@@ -796,7 +796,7 @@ function getCourseOptions(profile) {
 
 async function api(path, opts={}) {
   const r = await fetch(BASE+path, {headers:{'Content-Type':'application/json'},...opts});
-  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail||r.statusText); }
+  if (!r.ok) { const e = await r.json().catch(()=>({})); const error = new Error(e.detail||r.statusText); error.status = r.status; throw error; }
   return await r.json();
 }
 
@@ -985,12 +985,23 @@ async function generateResourceBundle() {
     await loadStudyTime();
     showToast('资源包已生成', 'success');
   } catch (e) {
-    showResourceWarning('生成失败：' + e.message);
-    showToast(e.message || '资源包生成失败', 'error');
+    var message = resourceGenerationErrorMessage(e);
+    showResourceWarning(message);
+    showToast(message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = '生成个性化资源包';
   }
+}
+
+function resourceGenerationErrorMessage(error) {
+  var messages = {
+    400: '输入内容未通过安全检查，请调整主题后重试。',
+    404: '未找到对应的学习档案，请重新登录后再试。',
+    422: '请求参数有误，请检查学习主题和资源类型。',
+    502: '生成服务暂时不可用，已保留当前页面内容，请稍后重试。'
+  };
+  return messages[error && error.status] || '资源包生成失败，请稍后重试。';
 }
 
 function showResourceWarning(message) {

@@ -14,7 +14,7 @@ def register_generation_routes(app: FastAPI, services: AppServices) -> None:
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(status_code=502, detail="resource generation failed") from exc
 
     @app.get("/api/generation/resource-bundles/{student_id}")
     async def list_resource_bundles(student_id: str):
