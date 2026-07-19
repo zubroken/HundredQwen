@@ -76,6 +76,17 @@ class AppServicesTest(unittest.TestCase):
         self.assertIs(services.exercise_service.knowledge_base, services.knowledge_base)
         self.assertIs(services.knowledge_service.knowledge_base, services.knowledge_base)
         self.assertIs(services.resource_service.resource_db, services.resource_db)
+        self.assertIs(services.generation_service.db, services.db)
+        self.assertIs(services.generation_service.resource_db, services.resource_db)
+        self.assertIs(services.generation_service.knowledge_base, services.knowledge_base)
+        self.assertIs(
+            services.generation_service.agents["document"][0],
+            services.document_agent,
+        )
+        self.assertIs(
+            services.generation_service.learning_path_agent,
+            services.learning_path_agent,
+        )
         self.assertIs(services.ppt_service.zhiwen_service, services.zhiwen_service)
         self.assertIs(services.model_gateway.get("deepseek"), services.llm_service)
         self.assertIs(services.model_gateway.get("spark"), services.spark_service)

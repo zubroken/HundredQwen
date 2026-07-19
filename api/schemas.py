@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ChatRequest(BaseModel):
@@ -108,3 +108,41 @@ class KnowledgeExportRequest(BaseModel):
     authors: list = []
     published: str = ""
     keywords: list = []
+
+
+class ResourceBundleRequest(BaseModel):
+    student_id: str = Field(..., min_length=1, max_length=50)
+    course_name: str = Field(default="人工智能", min_length=1, max_length=100)
+    topic: str = Field(..., min_length=1, max_length=200)
+    difficulty: str = "intermediate"
+    resource_types: list[str] = Field(
+        default_factory=lambda: [
+            "document",
+            "mindmap",
+            "exercise",
+            "reading",
+            "code_example",
+        ]
+    )
+
+    @field_validator("resource_types")
+    @classmethod
+    def validate_resource_types(cls, value):
+        allowed = {"document", "mindmap", "exercise", "reading", "code_example"}
+        if not value:
+            raise ValueError("resource_types cannot be empty")
+        invalid = [item for item in value if item not in allowed]
+        if invalid:
+            raise ValueError(f"unsupported resource type: {', '.join(invalid)}")
+        return value
+
+
+class PathNodeStatusRequest(BaseModel):
+    status: str = Field(..., min_length=1, max_length=20)
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value):
+        if value not in {"pending", "in_progress", "completed"}:
+            raise ValueError("invalid node status")
+        return value

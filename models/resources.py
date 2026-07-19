@@ -40,8 +40,21 @@ class Resource:
     created_at: str = ""
     student_id: str = ""  # 关联的学生
 
+    citations: List[Dict[str, Any]] = field(default_factory=list)
+    evidence_level: str = "unknown"
+    fallback: bool = False
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if isinstance(data.get("resource_type"), Enum):
+            data["resource_type"] = data["resource_type"].value
+        if not self.citations:
+            data.pop("citations", None)
+        if self.evidence_level == "unknown":
+            data.pop("evidence_level", None)
+        if not self.fallback:
+            data.pop("fallback", None)
+        return data
 
     @classmethod
     def from_dict(cls, d: dict) -> "Resource":
@@ -155,10 +168,33 @@ class LearningPath:
 
     @classmethod
     def from_dict(cls, d: dict) -> "LearningPath":
-        nodes = [PathNode(**n) for n in d.pop("nodes", [])]
-        lp = cls(**d)
+        data = dict(d)
+        nodes = [PathNode(**n) for n in data.pop("nodes", [])]
+        lp = cls(**data)
         lp.nodes = nodes
         return lp
+
+
+@dataclass
+class ResourceBundle:
+    bundle_id: str
+    student_id: str
+    topic: str
+    course_name: str
+    resource_ids: List[str]
+    path_id: Optional[str]
+    citations: List[Dict[str, Any]]
+    safety: Dict[str, Any]
+    status: str = "completed"
+    created_at: str = ""
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ResourceBundle":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
 class ResourceDB:
@@ -170,9 +206,13 @@ class ResourceDB:
     def _load_all(self) -> dict:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"resources": [], "learning_paths": []}
+            data = {}
+        data.setdefault("resources", [])
+        data.setdefault("learning_paths", [])
+        data.setdefault("resource_bundles", [])
+        return data
 
     def _save_all(self, data: dict):
         import os
@@ -183,6 +223,7 @@ class ResourceDB:
     def save_resource(self, resource: Resource):
         data = self._load_all()
         # 替换同ID或追加
+        existing = [i for i, r in enumerate(data["resources"]) if r.get("resource_id") == resource.resource_id]
         existing = [i for i, r in enumerate(data["resources"]) if r.get("resource_id") == resource.resource_id]
         if existing:
             data["resources"][existing[0]] = resource.to_dict()
@@ -212,3 +253,29 @@ class ResourceDB:
     def get_paths_by_student(self, student_id: str) -> List[LearningPath]:
         data = self._load_all()
         return [LearningPath.from_dict(p) for p in data["learning_paths"] if p.get("student_id") == student_id]
+
+    def save_bundle(self, bundle: ResourceBundle) -> None:
+        data = self._load_all()
+        existing = [
+            i for i, b in enumerate(data["resource_bundles"])
+            if b.get("bundle_id") == bundle.bundle_id
+        ]
+        if existing:
+            data["resource_bundles"][existing[0]] = bundle.to_dict()
+        else:
+            data["resource_bundles"].append(bundle.to_dict())
+        self._save_all(data)
+
+    def get_bundles_by_student(self, student_id: str) -> List[dict]:
+        data = self._load_all()
+        return [
+            b for b in data["resource_bundles"]
+            if b.get("student_id") == student_id
+        ]
+
+    def get_path_by_id(self, path_id: str) -> Optional[LearningPath]:
+        data = self._load_all()
+        for item in data["learning_paths"]:
+            if item.get("path_id") == path_id:
+                return LearningPath.from_dict(item)
+        return None

@@ -515,6 +515,44 @@ body { font-family:-apple-system,'Microsoft YaHei','PingFang SC',sans-serif; bac
       </div>
     </div>
 
+    <section id="resourceWorkbench" style="margin-top:24px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:22px;box-shadow:var(--shadow-sm);">
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px;">
+        <div>
+          <h3 style="margin:0;font-size:18px;color:#0f172a;">个性化学习资源包</h3>
+          <p style="margin:4px 0 0;color:#64748b;font-size:13px;">基于学生画像、知识库引用和五类 Agent 生成可刷新保留的学习闭环。</p>
+        </div>
+        <div style="display:flex;gap:8px;flex:1;min-width:280px;max-width:560px;">
+          <input id="resourceTopicInput" value="Transformer 注意力机制" placeholder="输入学习主题" style="flex:1;min-width:0;border:2px solid #e2e8f0;border-radius:10px;padding:10px 12px;font-size:14px;outline:none;">
+          <button id="resourceGenerateBtn" onclick="generateResourceBundle()" style="border:0;border-radius:10px;background:#2563eb;color:#fff;padding:0 18px;font-weight:700;cursor:pointer;white-space:nowrap;">生成个性化资源包</button>
+        </div>
+      </div>
+      <div id="resourceStageList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:16px;">
+        <div class="resource-stage" data-stage="profile" style="padding:10px;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:600;">分析画像</div>
+        <div class="resource-stage" data-stage="citation" style="padding:10px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:13px;font-weight:600;">检索教材依据</div>
+        <div class="resource-stage" data-stage="agents" style="padding:10px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:13px;font-weight:600;">生成五类资源</div>
+        <div class="resource-stage" data-stage="path" style="padding:10px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:13px;font-weight:600;">规划学习路径</div>
+      </div>
+      <div id="resourceWarning" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:10px;background:#fffbeb;color:#92400e;font-size:13px;"></div>
+      <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,0.9fr);gap:16px;">
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h4 style="margin:0;font-size:15px;color:#0f172a;">五类资源</h4>
+            <span style="font-size:12px;color:#64748b;">document · mindmap · exercise · reading · code_example</span>
+          </div>
+          <div id="resourceBundleCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">
+            <div style="grid-column:1/-1;padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;text-align:center;">暂无资源包，输入主题后生成。</div>
+          </div>
+          <div id="resourceCitationList" style="margin-top:12px;font-size:12px;color:#475569;"></div>
+        </div>
+        <aside style="border-left:1px solid #e2e8f0;padding-left:16px;">
+          <h4 style="margin:0 0 10px;font-size:15px;color:#0f172a;">学习路径</h4>
+          <div id="learningPathNodes" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="padding:14px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;font-size:13px;">生成资源包后自动规划路径。</div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
   </div>
 
   <!-- ===== Python 技能树 · 全屏覆盖层 ===== -->
@@ -826,6 +864,7 @@ function enterApp(profile) {
   updateSidebarUser(profile.name || '张三', chosenAvatarId);
   switchPanel('dashboard');
   loadStudyTime();
+  loadResourceWorkbench();
   onHashChange();
 }
 
@@ -884,6 +923,152 @@ async function studyTimeAction(event, action) {
 function studyTimeStart(event) { return studyTimeAction(event, 'start'); }
 function studyTimePause(event) { return studyTimeAction(event, 'pause'); }
 function studyTimeEnd(event) { return studyTimeAction(event, 'end'); }
+
+function setResourceStages(activeIndex) {
+  var stages = document.querySelectorAll('.resource-stage');
+  stages.forEach(function(stage, index) {
+    var done = index < activeIndex;
+    var active = index === activeIndex;
+    stage.style.background = done ? '#f0fdf4' : active ? '#eff6ff' : '#f8fafc';
+    stage.style.color = done ? '#15803d' : active ? '#1d4ed8' : '#64748b';
+    stage.textContent = (done ? '✓ ' : active ? '• ' : '') + stage.textContent.replace(/^✓ |^• /, '');
+  });
+}
+
+function resourceTypeLabel(type) {
+  return {
+    document: '讲解文档',
+    mindmap: '思维导图',
+    exercise: '练习题',
+    reading: '拓展阅读',
+    code_example: '代码案例'
+  }[type] || type;
+}
+
+async function loadResourceWorkbench() {
+  if (!studentId || !document.getElementById('resourceWorkbench')) return;
+  try {
+    var data = await api('/api/generation/resource-bundles/' + studentId);
+    var bundles = data.bundles || [];
+    if (bundles.length) renderResourceBundle(bundles[bundles.length - 1]);
+    var path = await api('/api/generation/learning-path/' + studentId).catch(function(){ return null; });
+    if (path) renderLearningPath(path);
+  } catch (e) {
+    showResourceWarning('资源包加载失败：' + e.message);
+  }
+}
+
+async function generateResourceBundle() {
+  var input = document.getElementById('resourceTopicInput');
+  var btn = document.getElementById('resourceGenerateBtn');
+  var topic = input.value.trim();
+  if (!topic) { showToast('请输入学习主题', 'error'); return; }
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  showResourceWarning('');
+  setResourceStages(0);
+  try {
+    setResourceStages(1);
+    var result = await api('/api/generation/resource-bundle', {
+      method:'POST',
+      body:JSON.stringify({
+        student_id: studentId,
+        course_name: profileData?.major || '人工智能',
+        topic: topic,
+        difficulty: 'intermediate',
+        resource_types: ['document','mindmap','exercise','reading','code_example']
+      })
+    });
+    setResourceStages(4);
+    renderResourceBundle(result);
+    renderLearningPath(result.path);
+    await loadStudyTime();
+    showToast('资源包已生成', 'success');
+  } catch (e) {
+    showResourceWarning('生成失败：' + e.message);
+    showToast(e.message || '资源包生成失败', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成个性化资源包';
+  }
+}
+
+function showResourceWarning(message) {
+  var el = document.getElementById('resourceWarning');
+  if (!el) return;
+  el.style.display = message ? '' : 'none';
+  el.textContent = message || '';
+}
+
+function renderResourceBundle(bundle) {
+  var cardWrap = document.getElementById('resourceBundleCards');
+  if (!cardWrap || !bundle) return;
+  var resources = bundle.resources || [];
+  if (!resources.length) {
+    cardWrap.innerHTML = '<div style="grid-column:1/-1;padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;text-align:center;">资源包暂无可展示资源。</div>';
+  } else {
+    cardWrap.innerHTML = resources.map(function(resource) {
+      var citations = resource.citations || bundle.citations || [];
+      var summary = resource.content?.summary || resource.content?.description || resource.content?.reading_guide || resource.content?.explanation || resource.title || '';
+      return '<article style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;background:#fff;">'
+        + '<div style="font-size:12px;color:#2563eb;font-weight:700;">' + resourceTypeLabel(resource.resource_type) + '</div>'
+        + '<h5 style="margin:6px 0 8px;font-size:15px;color:#0f172a;">' + (resource.title || '学习资源') + '</h5>'
+        + '<p style="margin:0;color:#64748b;font-size:12px;line-height:1.5;max-height:56px;overflow:hidden;">' + summary + '</p>'
+        + '<div style="margin-top:10px;display:flex;justify-content:space-between;color:#64748b;font-size:12px;">'
+        + '<span>' + (resource.difficulty || 'intermediate') + '</span><span>引用 ' + citations.length + '</span></div>'
+        + '</article>';
+    }).join('');
+  }
+  renderCitations(bundle.citations || []);
+  if (bundle.warnings && bundle.warnings.length) showResourceWarning(bundle.warnings.join('；'));
+}
+
+function renderCitations(citations) {
+  var el = document.getElementById('resourceCitationList');
+  if (!el) return;
+  if (!citations.length) {
+    el.innerHTML = '<div style="padding:10px;border-radius:10px;background:#fffbeb;color:#92400e;">知识库未找到充分依据，请核验。</div>';
+    return;
+  }
+  el.innerHTML = '<div style="font-weight:700;margin-bottom:6px;color:#0f172a;">引用依据</div>'
+    + citations.slice(0, 3).map(function(c) {
+      return '<div style="padding:8px 10px;border-radius:8px;background:#f8fafc;margin-bottom:6px;">'
+        + (c.title || '知识库') + (c.page ? ' · p.' + c.page : '')
+        + '<div style="color:#64748b;margin-top:3px;">' + (c.snippet || '').slice(0, 120) + '</div></div>';
+    }).join('');
+}
+
+function renderLearningPath(path) {
+  var wrap = document.getElementById('learningPathNodes');
+  if (!wrap || !path) return;
+  var nodes = path.nodes || [];
+  if (!nodes.length) {
+    wrap.innerHTML = '<div style="padding:14px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;font-size:13px;">学习路径暂无节点。</div>';
+    return;
+  }
+  wrap.innerHTML = nodes.map(function(node, index) {
+    var done = node.status === 'completed';
+    return '<div style="padding:12px;border:1px solid ' + (done ? '#bbf7d0' : '#e2e8f0') + ';border-radius:12px;background:' + (done ? '#f0fdf4' : '#fff') + ';">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;"><strong style="font-size:13px;color:#0f172a;">' + (index + 1) + '. ' + node.title + '</strong>'
+      + '<span style="font-size:11px;color:#64748b;">' + (node.estimated_hours || 1) + 'h</span></div>'
+      + '<p style="margin:6px 0;color:#64748b;font-size:12px;line-height:1.45;">' + (node.description || '按关联资源完成本阶段学习。') + '</p>'
+      + '<button onclick="completeLearningPathNode(\\'' + path.path_id + '\\',\\'' + node.node_id + '\\')" ' + (done ? 'disabled' : '') + ' style="padding:6px 10px;border-radius:8px;border:1px solid #2563eb;background:' + (done ? '#f0fdf4' : '#eff6ff') + ';color:#2563eb;font-size:12px;cursor:' + (done ? 'default' : 'pointer') + ';">' + (done ? '已完成' : '标记完成') + '</button>'
+      + '</div>';
+  }).join('');
+}
+
+async function completeLearningPathNode(pathId, nodeId) {
+  try {
+    var path = await api('/api/generation/learning-path/' + pathId + '/nodes/' + nodeId, {
+      method:'PUT',
+      body:JSON.stringify({status:'completed'})
+    });
+    renderLearningPath(path);
+    await loadResourceWorkbench();
+  } catch (e) {
+    showToast(e.message || '路径更新失败', 'error');
+  }
+}
 function updateSidebarUser(name, avatarId) {
   document.getElementById('sbName').textContent = name;
   const a = AVATARS.find(x => x.id === avatarId) || AVATARS[0];

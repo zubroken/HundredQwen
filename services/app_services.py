@@ -28,6 +28,7 @@ from services.model_gateway import ModelGateway, ModelGatewayConfig
 from services.paper_fetcher import PaperFetcher
 from services.ppt_service import PptService
 from services.resource_service import ResourceService
+from services.resource_generation_service import ResourceGenerationService
 from services.skill_tree_service import SkillTreeService
 from services.speech_service import SpeechService
 from services.study_time_service import StudyTimeService
@@ -46,6 +47,7 @@ class AppServices:
     agents: List[object]
     resource_db: ResourceDB
     resource_service: ResourceService
+    generation_service: ResourceGenerationService
     model_gateway: ModelGateway
     zhiwen_service: ZhiwenService
     ppt_service: PptService
@@ -291,6 +293,17 @@ def build_app_services(llm_config: LLMConfig | None = None) -> AppServices:
         document_agent=document_agent,
         knowledge_base=knowledge_base,
     )
+    generation_service = ResourceGenerationService(
+        db=db,
+        resource_db=resource_db,
+        knowledge_base=knowledge_base,
+        document_agent=document_agent,
+        mindmap_agent=mindmap_agent,
+        exercise_agent=exercise_agent,
+        reading_agent=reading_agent,
+        code_example_agent=code_example_agent,
+        learning_path_agent=learning_path_agent,
+    )
 
     return AppServices(
         llm_service=llm_service,
@@ -300,6 +313,7 @@ def build_app_services(llm_config: LLMConfig | None = None) -> AppServices:
         agents=agents,
         resource_db=resource_db,
         resource_service=resource_service,
+        generation_service=generation_service,
         model_gateway=model_gateway,
         zhiwen_service=zhiwen_service,
         ppt_service=ppt_service,

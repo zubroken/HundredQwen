@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from api.account_routes import register_account_routes
 from api.config_routes import register_config_routes
+from api.generation_routes import register_generation_routes
 from api.home_routes import register_home_routes
 from api.knowledge_routes import register_knowledge_routes
 from api.learning_routes import register_learning_routes
@@ -29,6 +30,7 @@ def create_app(llm_config: Optional[LLMConfig] = None) -> FastAPI:
     register_home_routes(app)
     register_account_routes(app, services)
     register_learning_routes(app, services)
+    register_generation_routes(app, services)
     register_config_routes(app, services)
     register_ppt_routes(app, services)
     register_knowledge_routes(app, services)

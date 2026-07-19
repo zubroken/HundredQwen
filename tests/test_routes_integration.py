@@ -93,6 +93,29 @@ class StubResourceService:
         }
 
 
+class StubGenerationService:
+    def generate_bundle(self, request):
+        return {
+            "bundle_id": "bundle-1",
+            "student_id": request["student_id"],
+            "status": "completed",
+            "resources": [],
+            "path": {"path_id": "path-1", "nodes": []},
+            "citations": [],
+            "safety": {"risk_level": "low"},
+            "warnings": [],
+        }
+
+    def list_bundles(self, student_id):
+        return [{"bundle_id": "bundle-1", "student_id": student_id}]
+
+    def get_learning_path(self, student_id):
+        return {"path_id": "path-1", "student_id": student_id, "nodes": []}
+
+    def update_path_node(self, path_id, node_id, status):
+        return {"path_id": path_id, "nodes": [{"node_id": node_id, "status": status}]}
+
+
 class RoutesIntegrationTest(unittest.TestCase):
     def make_services(self):
         return SimpleNamespace(
@@ -102,6 +125,7 @@ class RoutesIntegrationTest(unittest.TestCase):
             knowledge_service=StubKnowledgeService(),
             ppt_service=StubPptService(),
             resource_service=StubResourceService(),
+            generation_service=StubGenerationService(),
             llm_service=SimpleNamespace(
                 config=LLMConfig(
                     api_key="old-key",
@@ -149,6 +173,10 @@ class RoutesIntegrationTest(unittest.TestCase):
                 "/api/profile/{student_id}",
                 "/api/resources/{student_id}",
                 "/api/paths/{student_id}",
+                "/api/generation/resource-bundle",
+                "/api/generation/resource-bundles/{student_id}",
+                "/api/generation/learning-path/{student_id}",
+                "/api/generation/learning-path/{path_id}/nodes/{node_id}",
                 "/api/config/llm",
                 "/api/zhiwen/themes",
                 "/api/zhiwen/ppt/create",
